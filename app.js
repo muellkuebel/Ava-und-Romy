@@ -240,18 +240,39 @@
     } catch (_) {}
   }
 
+  const MIN_SANE_SIDE = 50;
+  let resizeRetryRaf = 0;
+  let resizeRetryCount = 0;
+  const MAX_RESIZE_RETRIES = 120; /* ~2s at 60fps */
+
   function squareStageSize() {
     // clientWidth/Height include padding — subtract it for the content box
     const cs = window.getComputedStyle(stageWrap);
-    const padX = parseFloat(cs.paddingLeft) + parseFloat(cs.paddingRight);
-    const padY = parseFloat(cs.paddingTop) + parseFloat(cs.paddingBottom);
+    const padX = (parseFloat(cs.paddingLeft) || 0) + (parseFloat(cs.paddingRight) || 0);
+    const padY = (parseFloat(cs.paddingTop) || 0) + (parseFloat(cs.paddingBottom) || 0);
     const w = stageWrap.clientWidth - padX;
     const h = stageWrap.clientHeight - padY;
-    return Math.max(40, Math.floor(Math.min(w, h)));
+    return Math.floor(Math.min(w, h));
+  }
+
+  function scheduleResizeRetry() {
+    if (resizeRetryRaf) return;
+    if (resizeRetryCount >= MAX_RESIZE_RETRIES) return;
+    resizeRetryCount += 1;
+    resizeRetryRaf = requestAnimationFrame(() => {
+      resizeRetryRaf = 0;
+      resizeCanvas();
+    });
   }
 
   function resizeCanvas() {
     const side = squareStageSize();
+    // iPad PWA: first open often has stage-wrap at 0/tiny until layout settles
+    if (!(side >= MIN_SANE_SIDE)) {
+      scheduleResizeRetry();
+      return;
+    }
+    resizeRetryCount = 0;
     dpr = window.devicePixelRatio || 1;
     const px = Math.max(1, Math.round(side * dpr));
 
@@ -494,9 +515,27 @@
   window.addEventListener('resize', onResize);
   window.addEventListener('orientationchange', () => setTimeout(resizeCanvas, 150));
 
+  // After layout: double rAF (Safari/iPad often has 0-size stage-wrap on first paint)
+  function afterLayout(fn) {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(fn);
+    });
+  }
+  afterLayout(resizeCanvas);
+  window.addEventListener('load', () => {
+    resizeCanvas();
+  });
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', onResize);
+  }
+  if (typeof ResizeObserver !== 'undefined' && stageWrap) {
+    const ro = new ResizeObserver(() => onResize());
+    ro.observe(stageWrap);
+  }
+
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js?v=21').catch(() => {});
+      navigator.serviceWorker.register('./sw.js?v=22').catch(() => {});
     });
   }
 
