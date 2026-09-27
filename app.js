@@ -41,8 +41,92 @@
 
   const PAINT_ALPHA = 1;
   const STROKE_MM = 8;
-  const STORAGE_KEY = 'ava-malt-paintings-v1';
-  const STORAGE_TMPL_KEY = 'ava-malt-current-template';
+  const STORAGE_KEY = 'ava-und-romy-paintings-v1';
+  const STORAGE_TMPL_KEY = 'ava-und-romy-current-template';
+  const LEGACY_STORAGE_KEY = 'ava-malt-paintings-v1';
+  const LEGACY_STORAGE_TMPL_KEY = 'ava-malt-current-template';
+  const IDB_NAME = 'ava-und-romy';
+  const IDB_STORE = 'kv';
+  const IDB_VERSION = 1;
+
+  function openPaintDb() {
+    return new Promise((resolve, reject) => {
+      const req = indexedDB.open(IDB_NAME, IDB_VERSION);
+      req.onupgradeneeded = () => {
+        const db = req.result;
+        if (!db.objectStoreNames.contains(IDB_STORE)) {
+          db.createObjectStore(IDB_STORE);
+        }
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+  }
+
+  function idbGet(key) {
+    return openPaintDb().then(
+      (db) =>
+        new Promise((resolve, reject) => {
+          const tx = db.transaction(IDB_STORE, 'readonly');
+          const req = tx.objectStore(IDB_STORE).get(key);
+          req.onsuccess = () => resolve(req.result);
+          req.onerror = () => reject(req.error);
+        })
+    );
+  }
+
+  function idbSet(key, value) {
+    return openPaintDb().then(
+      (db) =>
+        new Promise((resolve, reject) => {
+          const tx = db.transaction(IDB_STORE, 'readwrite');
+          tx.objectStore(IDB_STORE).put(value, key);
+          tx.oncomplete = () => resolve();
+          tx.onerror = () => reject(tx.error);
+        })
+    );
+  }
+
+  function readLegacyPaintingsRaw() {
+    try {
+      return (
+        localStorage.getItem(STORAGE_KEY) ||
+        localStorage.getItem(LEGACY_STORAGE_KEY) ||
+        sessionStorage.getItem(STORAGE_KEY) ||
+        sessionStorage.getItem(LEGACY_STORAGE_KEY) ||
+        null
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function readLegacyTemplateId() {
+    try {
+      return (
+        localStorage.getItem(STORAGE_TMPL_KEY) ||
+        localStorage.getItem(LEGACY_STORAGE_TMPL_KEY) ||
+        sessionStorage.getItem(STORAGE_TMPL_KEY) ||
+        sessionStorage.getItem(LEGACY_STORAGE_TMPL_KEY) ||
+        null
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
+  function clearLegacyPaintStorage() {
+    try {
+      [STORAGE_KEY, LEGACY_STORAGE_KEY].forEach((k) => {
+        localStorage.removeItem(k);
+        sessionStorage.removeItem(k);
+      });
+      [STORAGE_TMPL_KEY, LEGACY_STORAGE_TMPL_KEY].forEach((k) => {
+        localStorage.removeItem(k);
+        sessionStorage.removeItem(k);
+      });
+    } catch (_) {}
+  }
 
   const canvas = document.getElementById('canvas');
   const ctx = canvas.getContext('2d', { alpha: false });
@@ -232,16 +316,13 @@
     if (id === currentTemplateId) return;
     // Persist current painting, then switch
     saveCurrentToBuffer();
-    persistToStorage();
     currentTemplateId = id;
     loadBufferToCanvas(id);
     updateTemplateOverlay();
     templateBtnsEl.querySelectorAll('.template-btn').forEach((el) => {
       el.classList.toggle('active', el.dataset.template === id);
     });
-    try {
-      sessionStorage.setItem(STORAGE_TMPL_KEY, id);
-    } catch (_) {}
+    persistToStorage();
   }
 
   const MIN_SANE_SIDE = 50;
@@ -428,48 +509,102 @@
     persistToStorage();
   }
 
+  function snapshotPaintings() {
+    const data = {};
+    Object.keys(paintBuffers).forEach((id) => {
+      data[id] = paintBuffers[id].toDataURL('image/png');
+    });
+    return data;
+  }
+
+  let persistTimer = 0;
   function persistToStorage() {
+    // Debounce rapid endStroke / template switches a bit
+    clearTimeout(persistTimer);
+    persistTimer = setTimeout(() => {
+      persistToStorageNow();
+    }, 40);
+  }
+
+  function persistToStorageNow() {
+    const payload = {
+      paintings: snapshotPaintings(),
+      currentTemplateId,
+      savedAt: Date.now(),
+    };
+    idbSet(STORAGE_KEY, payload).catch(() => {
+      // Fallback: localStorage (may fail on quota with large canvases)
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(payload.paintings));
+        localStorage.setItem(STORAGE_TMPL_KEY, currentTemplateId);
+      } catch (_) {}
+    });
     try {
-      const data = {};
-      Object.keys(paintBuffers).forEach((id) => {
-        data[id] = paintBuffers[id].toDataURL('image/png');
-      });
-      sessionStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-      sessionStorage.setItem(STORAGE_TMPL_KEY, currentTemplateId);
-    } catch (_) {
-      // Quota / private mode — ignore
-    }
+      localStorage.setItem(STORAGE_TMPL_KEY, currentTemplateId);
+    } catch (_) {}
+  }
+
+  function applyPaintingsData(data) {
+    if (!data || typeof data !== 'object') return;
+    Object.keys(data).forEach((id) => {
+      if (!TEMPLATES.some((t) => t.id === id)) return;
+      const src = data[id];
+      if (!src) return;
+      const img = new Image();
+      img.onload = () => {
+        const buf = ensureBuffer(
+          id,
+          canvas.width || img.width,
+          canvas.height || img.height
+        );
+        const bctx = buf.getContext('2d');
+        bctx.fillStyle = '#FFFFFF';
+        bctx.fillRect(0, 0, buf.width, buf.height);
+        bctx.drawImage(img, 0, 0, buf.width, buf.height);
+        if (id === currentTemplateId) {
+          loadBufferToCanvas(id);
+        }
+      };
+      img.src = src;
+    });
   }
 
   function restoreFromStorage() {
-    try {
-      const raw = sessionStorage.getItem(STORAGE_KEY);
-      if (!raw) return;
-      const data = JSON.parse(raw);
-      Object.keys(data).forEach((id) => {
-        if (!TEMPLATES.some((t) => t.id === id)) return;
-        const img = new Image();
-        img.onload = () => {
-          const buf = ensureBuffer(
-            id,
-            canvas.width || img.width,
-            canvas.height || img.height
-          );
-          const bctx = buf.getContext('2d');
-          bctx.fillStyle = '#FFFFFF';
-          bctx.fillRect(0, 0, buf.width, buf.height);
-          bctx.drawImage(img, 0, 0, buf.width, buf.height);
-          if (id === currentTemplateId) {
-            loadBufferToCanvas(id);
+    return idbGet(STORAGE_KEY)
+      .then((payload) => {
+        if (payload && payload.paintings) {
+          if (
+            payload.currentTemplateId &&
+            TEMPLATES.some((t) => t.id === payload.currentTemplateId)
+          ) {
+            currentTemplateId = payload.currentTemplateId;
           }
-        };
-        img.src = data[id];
+          applyPaintingsData(payload.paintings);
+          return;
+        }
+        // Migrate one-time from older session/local storage
+        const raw = readLegacyPaintingsRaw();
+        const savedT = readLegacyTemplateId();
+        if (savedT && TEMPLATES.some((t) => t.id === savedT)) {
+          currentTemplateId = savedT;
+        }
+        if (!raw) return;
+        const data = JSON.parse(raw);
+        applyPaintingsData(data);
+        // Save into IndexedDB and drop legacy keys
+        persistToStorageNow();
+        clearLegacyPaintStorage();
+      })
+      .catch(() => {
+        try {
+          const raw = readLegacyPaintingsRaw();
+          const savedT = readLegacyTemplateId();
+          if (savedT && TEMPLATES.some((t) => t.id === savedT)) {
+            currentTemplateId = savedT;
+          }
+          if (raw) applyPaintingsData(JSON.parse(raw));
+        } catch (_) {}
       });
-      const savedT = sessionStorage.getItem(STORAGE_TMPL_KEY);
-      if (savedT && TEMPLATES.some((t) => t.id === savedT)) {
-        currentTemplateId = savedT;
-      }
-    } catch (_) {}
   }
 
   // Pointer events
@@ -540,14 +675,32 @@
 
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js?v=22').catch(() => {});
+      navigator.serviceWorker.register('./sw.js?v=24').catch(() => {});
     });
   }
+
+  // Flush paintings when leaving the app (Home Screen / Safari tab close)
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      clearTimeout(persistTimer);
+      if (canvasReady) {
+        saveCurrentToBuffer();
+        persistToStorageNow();
+      }
+    }
+  });
+  window.addEventListener('pagehide', () => {
+    clearTimeout(persistTimer);
+    if (canvasReady) {
+      saveCurrentToBuffer();
+      persistToStorageNow();
+    }
+  });
 
   // Init
   buildPalette();
   try {
-    const savedT = sessionStorage.getItem(STORAGE_TMPL_KEY);
+    const savedT = readLegacyTemplateId();
     if (savedT && TEMPLATES.some((t) => t.id === savedT)) {
       currentTemplateId = savedT;
     }
@@ -560,5 +713,10 @@
     buildTemplates();
   });
   resizeCanvas();
-  restoreFromStorage();
+  restoreFromStorage().then(() => {
+    // Template may have been restored — refresh buttons/overlay
+    buildTemplates();
+    updateTemplateOverlay();
+    if (canvasReady) loadBufferToCanvas(currentTemplateId);
+  });
 })();
