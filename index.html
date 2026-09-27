@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Ava & Romy" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#000000" />
+  <meta name="description" content="Ava & Romy – Fingerfarben fürs iPad" />
+  <title>Ava & Romy</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png" />
+  <link rel="stylesheet" href="styles.css?v=18" />
+</head>
+<body>
+  <div id="app">
+    <div id="bezel" aria-hidden="true"></div>
+
+    <aside id="palette" role="toolbar" aria-label="Farben">
+      <div id="swatches"></div>
+      <button type="button" id="clear-btn" aria-label="Alles löschen" title="Löschen">
+        <svg viewBox="0 0 24 24" width="100%" height="100%" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/>
+          <path d="M8 8l8 8M16 8l-8 8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </button>
+    </aside>
+
+    <div id="stage-wrap">
+      <main id="stage">
+        <canvas id="canvas" aria-label="Malfläche"></canvas>
+        <div id="template-overlay" aria-hidden="true"></div>
+      </main>
+    </div>
+
+    <aside id="templates" role="toolbar" aria-label="Vorlagen">
+      <div id="template-btns"></div>
+    </aside>
+  </div>
+
+  <div id="mm-ref" aria-hidden="true"></div>
+
+  <script src="app.js?v=18" defer></script>
+</body>
+</html>
