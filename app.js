@@ -39,7 +39,7 @@
     { id: 'blume', name: 'Blume', file: './templates/blume.svg' },
   ];
 
-  const PAINT_ALPHA = 0.8;
+  const PAINT_ALPHA = 1;
   const STROKE_MM = 8;
   const STORAGE_KEY = 'ava-malt-paintings-v1';
   const STORAGE_TMPL_KEY = 'ava-malt-current-template';
@@ -60,10 +60,8 @@
 
   let currentColor = COLORS[0].hex;
   let currentTemplateId = TEMPLATES[0].id;
-  let drawing = false;
-  let activePointerId = null;
-  let lastX = 0;
-  let lastY = 0;
+  /** @type {Map<number, { lastX: number, lastY: number }>} */
+  const activePointers = new Map();
   let dpr = 1;
   let canvasReady = false;
 
@@ -292,7 +290,35 @@
     ctx.lineJoin = 'round';
     ctx.lineWidth = strokeWidthDevicePx();
     ctx.strokeStyle = currentColor;
+    ctx.fillStyle = currentColor;
     ctx.globalAlpha = PAINT_ALPHA;
+  }
+
+  /** Draw a continuous opaque segment; interpolate when the pointer jumps. */
+  function strokeSegment(x0, y0, x1, y1) {
+    const dx = x1 - x0;
+    const dy = y1 - y0;
+    const dist = Math.hypot(dx, dy);
+    const maxStep = Math.max(2, strokeWidthDevicePx() * 0.4);
+    ctx.beginPath();
+    ctx.moveTo(x0, y0);
+    if (dist <= maxStep) {
+      ctx.lineTo(x1, y1);
+    } else {
+      const n = Math.ceil(dist / maxStep);
+      for (let i = 1; i <= n; i++) {
+        const t = i / n;
+        ctx.lineTo(x0 + dx * t, y0 + dy * t);
+      }
+    }
+    ctx.stroke();
+  }
+
+  function paintTapDot(x, y) {
+    const r = strokeWidthDevicePx() / 2;
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, Math.PI * 2);
+    ctx.fill();
   }
 
   function updateOrientationClass() {
@@ -321,20 +347,15 @@
   }
 
   function startStroke(e) {
-    if (activePointerId !== null) return;
+    if (activePointers.has(e.pointerId)) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
 
-    activePointerId = e.pointerId;
-    drawing = true;
     const p = canvasPoint(e);
-    lastX = p.x;
-    lastY = p.y;
+    activePointers.set(e.pointerId, { lastX: p.x, lastY: p.y });
 
     applyStrokeStyle();
-    ctx.beginPath();
-    ctx.moveTo(lastX, lastY);
-    ctx.lineTo(lastX + 0.01, lastY);
-    ctx.stroke();
+    // Filled circle for tap — avoids short-line + first-move double paint
+    paintTapDot(p.x, p.y);
 
     try {
       canvas.setPointerCapture(e.pointerId);
@@ -342,25 +363,22 @@
   }
 
   function moveStroke(e) {
-    if (!drawing || e.pointerId !== activePointerId) return;
+    const state = activePointers.get(e.pointerId);
+    if (!state) return;
     const p = canvasPoint(e);
     applyStrokeStyle();
-    ctx.beginPath();
-    ctx.moveTo(lastX, lastY);
-    ctx.lineTo(p.x, p.y);
-    ctx.stroke();
-    lastX = p.x;
-    lastY = p.y;
+    strokeSegment(state.lastX, state.lastY, p.x, p.y);
+    state.lastX = p.x;
+    state.lastY = p.y;
   }
 
   function endStroke(e) {
-    if (e.pointerId !== activePointerId) return;
-    drawing = false;
-    activePointerId = null;
+    if (!activePointers.has(e.pointerId)) return;
+    activePointers.delete(e.pointerId);
     try {
       canvas.releasePointerCapture(e.pointerId);
     } catch (_) {}
-    // Persist after each stroke
+    // Persist when this finger lifts (others may still be drawing)
     saveCurrentToBuffer();
     persistToStorage();
   }
@@ -435,7 +453,7 @@
   canvas.addEventListener('pointerup', endStroke);
   canvas.addEventListener('pointercancel', endStroke);
   canvas.addEventListener('pointerleave', (e) => {
-    if (e.pointerId === activePointerId) endStroke(e);
+    if (activePointers.has(e.pointerId)) endStroke(e);
   });
 
   canvas.addEventListener(
@@ -478,7 +496,7 @@
 
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js?v=20').catch(() => {});
+      navigator.serviceWorker.register('./sw.js?v=21').catch(() => {});
     });
   }
 
