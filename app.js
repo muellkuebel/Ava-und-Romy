@@ -184,12 +184,15 @@
       btn.style.setProperty('--c', c.hex);
       btn.setAttribute('aria-label', c.name);
       btn.dataset.color = c.hex;
-      btn.addEventListener('click', (e) => {
+      // pointerdown: Farbe auch wechseln, während ein anderer Finger noch malt
+      // (iOS liefert oft keinen click, solange eine Touch-Geste aktiv ist)
+      const pick = (e) => {
         e.preventDefault();
         e.stopPropagation();
         selectColor(c.hex, btn);
-      });
-      btn.addEventListener('pointerdown', (e) => e.stopPropagation());
+      };
+      btn.addEventListener('pointerdown', pick);
+      btn.addEventListener('click', pick);
       swatchesEl.appendChild(btn);
     });
   }
@@ -206,12 +209,13 @@
       btn.setAttribute('aria-label', 'Vorlage: ' + t.name);
       btn.dataset.template = t.id;
       btn.innerHTML = templateSvgMarkup(t, false);
-      btn.addEventListener('click', (e) => {
+      const pick = (e) => {
         e.preventDefault();
         e.stopPropagation();
         selectTemplate(t.id, btn);
-      });
-      btn.addEventListener('pointerdown', (e) => e.stopPropagation());
+      };
+      btn.addEventListener('pointerdown', pick);
+      btn.addEventListener('click', pick);
       templateBtnsEl.appendChild(btn);
     });
   }
@@ -492,12 +496,13 @@
     { passive: false }
   );
 
-  clearBtn.addEventListener('click', (e) => {
+  const clearPick = (e) => {
     e.preventDefault();
     e.stopPropagation();
     clearCanvas();
-  });
-  clearBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+  };
+  clearBtn.addEventListener('pointerdown', clearPick);
+  clearBtn.addEventListener('click', clearPick);
 
   document.addEventListener(
     'touchmove',
