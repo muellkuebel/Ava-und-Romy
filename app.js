@@ -594,8 +594,8 @@
     return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   }
 
-  /** Short paper-rip / small shredder. Synthesized, not a sample. Kept quiet. */
-  function playShredSound() {
+  /** Paper-shredder hum/rip. Synthesized; stretched to match the pull. Kept quiet. */
+  function playShredSound(durationSec) {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return;
     try {
@@ -604,8 +604,8 @@
       return;
     }
     const actx = shredAudio;
+    const dur = Math.max(0.4, Math.min(3.2, durationSec || 1.85));
     const start = () => {
-      const dur = 0.42;
       const sr = actx.sampleRate;
       const n = (sr * dur) | 0;
       const buffer = actx.createBuffer(1, n, sr);
@@ -617,21 +617,22 @@
         const white = Math.random() * 2 - 1;
         hp = hp * 0.72 + white * 0.28;
         lp = lp * 0.9 + white * 0.1;
-        const attack = Math.min(1, t / 0.025);
-        const release = t > 0.3 ? Math.max(0, (dur - t) / 0.12) : 1;
-        const rip = 0.45 + 0.55 * Math.abs(Math.sin(2 * Math.PI * (22 + 16 * t) * t));
+        const attack = Math.min(1, t / 0.04);
+        const release = t > dur - 0.28 ? Math.max(0, (dur - t) / 0.28) : 1;
+        const rip = 0.45 + 0.55 * Math.abs(Math.sin(2 * Math.PI * (18 + 12 * (t / dur)) * t));
         const crackle = hp * rip;
-        const motor = Math.sin(2 * Math.PI * 62 * t) * 0.12 * (0.65 + 0.35 * Math.sin(2 * Math.PI * 17 * t));
-        data[i] = (crackle * 0.62 + lp * 0.18 + motor) * attack * release * 0.42;
+        const motor = Math.sin(2 * Math.PI * 58 * t) * 0.14 * (0.6 + 0.4 * Math.sin(2 * Math.PI * 14 * t));
+        const grind = Math.sin(2 * Math.PI * (90 + 40 * Math.sin(2 * Math.PI * 3.2 * t)) * t) * 0.05;
+        data[i] = (crackle * 0.58 + lp * 0.16 + motor + grind) * attack * release * 0.38;
       }
       const src = actx.createBufferSource();
       src.buffer = buffer;
       const filter = actx.createBiquadFilter();
       filter.type = 'highpass';
-      filter.frequency.value = 240;
-      filter.Q.value = 0.6;
+      filter.frequency.value = 220;
+      filter.Q.value = 0.55;
       const gain = actx.createGain();
-      gain.gain.value = 0.32;
+      gain.gain.value = 0.3;
       src.connect(filter);
       filter.connect(gain);
       gain.connect(actx.destination);
@@ -644,87 +645,61 @@
     }
   }
 
-  function overlayToImage() {
-    const svg = templateOverlay.querySelector('svg');
-    if (!svg) return Promise.resolve(null);
-    let xml = '';
-    try {
-      const clone = svg.cloneNode(true);
-      clone.setAttribute('width', '100');
-      clone.setAttribute('height', '100');
-      xml = new XMLSerializer().serializeToString(clone);
-    } catch (_) {
-      return Promise.resolve(null);
+  function shredderBarHtml(widthPx) {
+    const W = 860;
+    const H = 74;
+    let down = '';
+    let up = '';
+    const n = 18;
+    const span = 760;
+    const x0 = 50;
+    for (let i = 0; i < n; i++) {
+      const x = x0 + (i + 0.5) * (span / n);
+      const tw = 18;
+      down +=
+        '<polygon points="' +
+        (x - tw / 2) +
+        ',14 ' +
+        (x + tw / 2) +
+        ',14 ' +
+        x +
+        ',26" fill="#111"/>';
+      const x2 = x + tw / 2;
+      up +=
+        '<polygon points="' +
+        (x2 - tw / 2) +
+        ',60 ' +
+        (x2 + tw / 2) +
+        ',60 ' +
+        x2 +
+        ',48" fill="#1a1a1a"/>';
     }
-    const blob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    return new Promise((resolve) => {
-      const img = new Image();
-      const done = (value) => {
-        URL.revokeObjectURL(url);
-        resolve(value);
-      };
-      img.onload = () => done(img);
-      img.onerror = () => done(null);
-      img.src = url;
-    });
+    return (
+      '<svg viewBox="0 0 ' +
+      W +
+      ' ' +
+      H +
+      '" width="' +
+      widthPx +
+      '" height="' +
+      Math.round((widthPx * H) / W) +
+      '" aria-hidden="true" preserveAspectRatio="none">' +
+      '<rect x="8" y="6" width="16" height="62" rx="3" fill="#121212" stroke="#555"/>' +
+      '<rect x="836" y="6" width="16" height="62" rx="3" fill="#121212" stroke="#555"/>' +
+      '<rect x="22" y="0" width="816" height="16" rx="3" fill="#2c2c2c" stroke="#666" stroke-width="1"/>' +
+      '<rect x="22" y="58" width="816" height="16" rx="3" fill="#1a1a1a" stroke="#555" stroke-width="1"/>' +
+      down +
+      up +
+      '<circle cx="36" cy="8" r="2" fill="#0a0a0a"/>' +
+      '<circle cx="824" cy="8" r="2" fill="#0a0a0a"/>' +
+      '<circle cx="36" cy="66" r="2" fill="#0a0a0a"/>' +
+      '<circle cx="824" cy="66" r="2" fill="#0a0a0a"/>' +
+      '</svg>'
+    );
   }
 
-  function withTimeout(promise, ms) {
-    return new Promise((resolve) => {
-      let settled = false;
-      const timer = setTimeout(() => {
-        if (!settled) {
-          settled = true;
-          resolve(null);
-        }
-      }, ms);
-      promise.then(
-        (value) => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          resolve(value);
-        },
-        () => {
-          if (settled) return;
-          settled = true;
-          clearTimeout(timer);
-          resolve(null);
-        }
-      );
-    });
-  }
-
-  function sheetSnapshot() {
-    const shot = document.createElement('canvas');
-    shot.width = Math.max(1, canvas.width);
-    shot.height = Math.max(1, canvas.height);
-    const sctx = shot.getContext('2d');
-    sctx.fillStyle = '#ffffff';
-    sctx.fillRect(0, 0, shot.width, shot.height);
-    sctx.drawImage(canvas, 0, 0);
-    return withTimeout(overlayToImage(), 200).then((img) => {
-      if (img) {
-        try {
-          sctx.drawImage(img, 0, 0, shot.width, shot.height);
-        } catch (_) {}
-      }
-      return new Promise((resolve) => {
-        let done = false;
-        const finish = (blob) => {
-          if (done) return;
-          done = true;
-          resolve(blob || null);
-        };
-        try {
-          shot.toBlob((blob) => finish(blob), 'image/jpeg', 0.62);
-        } catch (_) {
-          finish(null);
-        }
-        window.setTimeout(() => finish(null), 500);
-      });
-    });
+  function easeInOutCubic(t) {
+    return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
   }
 
   function runShredAnimation(blob) {
@@ -739,71 +714,80 @@
         return;
       }
       const url = URL.createObjectURL(blob);
-      const n = 14;
+      const W = rect.width;
+      const H = rect.height;
+      const barW = Math.round(W * 1.075);
+      const barH = Math.max(42, Math.round(barW * (74 / 860)));
+      const stripN = 14;
+      const pulls = [6, 18, 9, 22, 5, 16, 11, 24, 7, 19, 10, 15, 4, 20];
+      const SHRED_MS = 1900;
+      const HOLD_MS = 140;
+      const FLIP_MS = 720;
+
       const layer = document.createElement('div');
-      layer.className = 'shred-layer';
+      layer.className = 'shred-fx';
       layer.setAttribute('aria-hidden', 'true');
-      const sw = rect.width / n;
-      for (let i = 0; i < n; i++) {
+
+      const paper = document.createElement('div');
+      paper.className = 'shred-paper';
+      const paperArt = document.createElement('div');
+      paperArt.className = 'shred-art';
+      paperArt.style.backgroundImage = 'url("' + url + '")';
+      paperArt.style.width = W + 'px';
+      paperArt.style.height = H + 'px';
+      paper.appendChild(paperArt);
+
+      const pull = document.createElement('div');
+      pull.className = 'shred-pull';
+      const stripArts = [];
+      for (let i = 0; i < stripN; i++) {
         const strip = document.createElement('div');
-        strip.className = 'shred-strip';
-        strip.style.left = i * sw + 'px';
-        strip.style.width = sw + 0.6 + 'px';
-        strip.style.backgroundImage = 'url("' + url + '")';
-        strip.style.backgroundSize = rect.width + 'px ' + rect.height + 'px';
-        strip.style.backgroundPosition = -i * sw + 'px 0px';
-        layer.appendChild(strip);
+        strip.className = 'shred-hang';
+        const col = W / stripN;
+        const gap = Math.max(3, col * 0.1);
+        const left = i * col + gap / 2;
+        const sw = col - gap;
+        strip.style.left = left + 'px';
+        strip.style.width = sw + 'px';
+        strip.style.setProperty('--pull', pulls[i] + 'px');
+        const art = document.createElement('div');
+        art.className = 'shred-art';
+        art.style.backgroundImage = 'url("' + url + '")';
+        art.style.width = W + 'px';
+        art.style.height = H + 'px';
+        art.style.left = -left + 'px';
+        strip.appendChild(art);
+        pull.appendChild(strip);
+        stripArts.push(art);
       }
+
+      const bar = document.createElement('div');
+      bar.className = 'shred-bar';
+      bar.style.width = barW + 'px';
+      bar.style.height = barH + 'px';
+      bar.style.marginLeft = -barW / 2 + 'px';
+      bar.innerHTML = shredderBarHtml(barW);
+
+      const page = document.createElement('div');
+      page.className = 'shred-page';
+
+      layer.appendChild(paper);
+      layer.appendChild(pull);
+      layer.appendChild(bar);
+      layer.appendChild(page);
+
       const prevOverflow = stageEl.style.overflow;
       const prevZ = stageEl.style.zIndex;
-      stageEl.style.overflow = 'visible';
+      const prevBg = stageEl.style.background;
+      stageEl.style.overflow = 'hidden';
       stageEl.style.zIndex = '8';
+      stageEl.style.background = '#000';
       canvas.style.visibility = 'hidden';
       templateOverlay.style.visibility = 'hidden';
       stageEl.appendChild(layer);
 
-      if (!layer.firstChild || typeof layer.firstChild.animate !== 'function') {
-        URL.revokeObjectURL(url);
-        layer.remove();
-        canvas.style.visibility = '';
-        templateOverlay.style.visibility = '';
-        stageEl.style.overflow = prevOverflow;
-        stageEl.style.zIndex = prevZ;
-        resolve();
-        return;
-      }
-
-      const pending = [];
-      const strips = layer.children;
-      for (let i = 0; i < strips.length; i++) {
-        const dir = i % 2 === 0 ? -1 : 1;
-        const drift = dir * (12 + (i % 4) * 8);
-        const rot = dir * (8 + (i % 3) * 5);
-        const delay = (i % 5) * 18;
-        const anim = strips[i].animate(
-          [
-            { transform: 'translate3d(0,0,0) rotate(0deg)', opacity: 1 },
-            {
-              transform: 'translate3d(' + dir * 6 + 'px, 10%, 0) rotate(' + dir * 3 + 'deg)',
-              opacity: 1,
-              offset: 0.2,
-            },
-            {
-              transform: 'translate3d(' + drift + 'px, 120%, 0) rotate(' + rot + 'deg)',
-              opacity: 0.8,
-            },
-          ],
-          {
-            duration: 640,
-            delay: delay,
-            easing: 'cubic-bezier(0.16, 0.84, 0.3, 1)',
-            fill: 'forwards',
-          }
-        );
-        pending.push(anim.finished.catch(() => {}));
-      }
       let finished = false;
-      const finish = () => {
+      const cleanup = () => {
         if (finished) return;
         finished = true;
         URL.revokeObjectURL(url);
@@ -812,19 +796,67 @@
         templateOverlay.style.visibility = '';
         stageEl.style.overflow = prevOverflow;
         stageEl.style.zIndex = prevZ;
+        stageEl.style.background = prevBg;
         resolve();
       };
-      Promise.all(pending).then(finish, finish);
-      window.setTimeout(finish, 1100);
+
+      const applyCut = (cutY, feed) => {
+        const paperH = Math.max(0, Math.min(H, cutY));
+        paper.style.height = paperH + 'px';
+        paper.style.opacity = paperH > 0.5 ? '1' : '0';
+        paperArt.style.transform = 'translate3d(0,' + feed + 'px,0)';
+        bar.style.top = cutY + 'px';
+        bar.style.opacity = cutY < H + 4 && cutY > -barH - 2 ? '1' : '0';
+        pull.style.top = cutY + 'px';
+        const showPull = cutY < H - 2 && cutY > -barH * 0.35;
+        pull.style.opacity = showPull ? '1' : '0';
+        // Art in strips continues from the cut; feed keeps continuity with sliding paper.
+        const artTop = -cutY + feed;
+        for (let i = 0; i < stripArts.length; i++) {
+          stripArts[i].style.transform = 'translate3d(0,' + artTop + 'px,0)';
+        }
+      };
+
+      // Start: shredder near bottom, sheet almost full, slight feed.
+      applyCut(H - barH * 0.35, 0);
+
+      const t0 = performance.now();
+      const tick = (now) => {
+        if (finished) return;
+        const raw = Math.min(1, (now - t0) / SHRED_MS);
+        const e = easeInOutCubic(raw);
+        // Shredder travels from near-bottom up and exits off the top.
+        const cutY = H - barH * 0.35 - (H - barH * 0.35 + barH + 8) * e;
+        // Sheet content feeds downward into the slot at the same time.
+        const feed = (H * 0.62) * e;
+        applyCut(cutY, feed);
+        if (raw < 1) {
+          requestAnimationFrame(tick);
+          return;
+        }
+        // Fully black — shredder gone.
+        applyCut(-barH - 10, H * 0.62);
+        pull.style.opacity = '0';
+        bar.style.opacity = '0';
+        paper.style.opacity = '0';
+        window.setTimeout(() => {
+          if (finished) return;
+          page.classList.add('shred-page-flip');
+          window.setTimeout(cleanup, FLIP_MS + 40);
+        }, HOLD_MS);
+      };
+      requestAnimationFrame(tick);
+      // Safety net if rAF stalls (background tab).
+      window.setTimeout(cleanup, SHRED_MS + HOLD_MS + FLIP_MS + 800);
     });
   }
 
   function shredAndClear() {
     if (shredding) return;
     shredding = true;
-    playShredSound();
+    playShredSound(1.9);
     const snap = sheetSnapshot();
-    // Empty the saved sheet immediately; the strips are only a picture of it.
+    // Empty the saved sheet immediately; the fx layer paints from the snapshot.
     clearCanvas();
     snap
       .then((blob) => runShredAnimation(blob))
