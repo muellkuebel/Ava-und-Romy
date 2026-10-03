@@ -740,8 +740,64 @@
   }
 
   /**
-   * Copy the painted sheet before clearCanvas wipes it.
-   * The pixel copy is synchronous. Always resolves, never throws.
+   * Draw the coloring-page lines onto an already-copied paint bitmap.
+   * Paint is copied synchronously by the caller before clearCanvas.
+   * A slow or failed SVG decode must not stall the shredder.
+   */
+  function compositeTemplate(copy) {
+    return new Promise((resolve) => {
+      let url = '';
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        if (url) {
+          try { URL.revokeObjectURL(url); } catch (_) {}
+          url = '';
+        }
+        resolve();
+      };
+      const timer = window.setTimeout(finish, 450);
+      try {
+        const svgEl = templateOverlay && templateOverlay.querySelector('svg');
+        if (!svgEl) {
+          window.clearTimeout(timer);
+          finish();
+          return;
+        }
+        const clone = svgEl.cloneNode(true);
+        clone.setAttribute('width', String(copy.width));
+        clone.setAttribute('height', String(copy.height));
+        clone.setAttribute('preserveAspectRatio', 'none');
+        if (!clone.getAttribute('xmlns')) {
+          clone.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+        }
+        const xml = new XMLSerializer().serializeToString(clone);
+        url = URL.createObjectURL(new Blob([xml], { type: 'image/svg+xml;charset=utf-8' }));
+        const img = new Image();
+        img.onload = () => {
+          window.clearTimeout(timer);
+          try {
+            copy.getContext('2d').drawImage(img, 0, 0, copy.width, copy.height);
+          } catch (_) {}
+          finish();
+        };
+        img.onerror = () => {
+          window.clearTimeout(timer);
+          finish();
+        };
+        img.src = url;
+      } catch (_) {
+        window.clearTimeout(timer);
+        finish();
+      }
+    });
+  }
+
+  /**
+   * Copy the painted sheet (color) before clearCanvas wipes it, then
+   * composite the template lines on top. The pixel copy is synchronous.
+   * Always resolves, never throws.
    */
   function sheetSnapshot() {
     try {
@@ -758,7 +814,7 @@
       try {
         cctx.drawImage(canvas, 0, 0);
       } catch (_) {}
-      return canvasToPngBlob(copy);
+      return compositeTemplate(copy).then(() => canvasToPngBlob(copy));
     } catch (_) {
       return Promise.resolve(null);
     }
@@ -803,8 +859,8 @@
       const H = rect.height;
       const barW = Math.round(W * 1.075);
       const barH = Math.max(42, Math.round(barW * (74 / 860)));
-      const stripN = 14;
-      const pulls = [6, 18, 9, 22, 5, 16, 11, 24, 7, 19, 10, 15, 4, 20];
+      const stripN = 16;
+      const lengthFrac = [0.62, 1, 0.74, 0.93, 0.58, 0.86, 0.7, 0.98, 0.66, 0.9, 0.78, 0.84, 0.6, 0.96, 0.72, 0.88];
       const SHRED_MS = 1900;
       const HOLD_MS = 140;
       const FLIP_MS = 720;
@@ -824,17 +880,28 @@
 
       const pull = document.createElement('div');
       pull.className = 'shred-pull';
+      const strips = [];
       const stripArts = [];
       for (let i = 0; i < stripN; i++) {
         const strip = document.createElement('div');
         strip.className = 'shred-hang';
         const col = W / stripN;
-        const gap = Math.max(3, col * 0.1);
+        const gap = Math.max(4, col * 0.14);
         const left = i * col + gap / 2;
-        const sw = col - gap;
+        const sw = Math.max(4, col - gap);
         strip.style.left = left + 'px';
         strip.style.width = sw + 'px';
-        strip.style.setProperty('--pull', pulls[i] + 'px');
+        // Straight under the slot, torn along the bottom.
+        const teeth = 5;
+        const pts = ['0% 0%', '100% 0%'];
+        for (let k = teeth; k >= 0; k--) {
+          const x = (k / teeth) * 100;
+          const wave = 70 + ((i * 13 + k * 23) % 30);
+          pts.push(x.toFixed(1) + '% ' + wave + '%');
+        }
+        const clip = 'polygon(' + pts.join(',') + ')';
+        strip.style.clipPath = clip;
+        strip.style.webkitClipPath = clip;
         const art = document.createElement('div');
         art.className = 'shred-art';
         if (url) art.style.backgroundImage = 'url("' + url + '")';
@@ -843,6 +910,7 @@
         art.style.left = -left + 'px';
         strip.appendChild(art);
         pull.appendChild(strip);
+        strips.push(strip);
         stripArts.push(art);
       }
 
@@ -855,6 +923,15 @@
 
       const page = document.createElement('div');
       page.className = 'shred-page';
+      try {
+        const lines = templateSvgMarkup(getTemplate(currentTemplateId), true);
+        if (lines) {
+          const holder = document.createElement('div');
+          holder.className = 'shred-page-lines';
+          holder.innerHTML = lines;
+          page.appendChild(holder);
+        }
+      } catch (_) {}
 
       layer.appendChild(paper);
       layer.appendChild(pull);
@@ -868,25 +945,34 @@
       if (templateOverlay) templateOverlay.style.visibility = 'hidden';
       stageEl.appendChild(layer);
 
-      const applyCut = (cutY, feed) => {
+      const TUCK = 3;
+      const applyCut = (cutY, feed, reveal) => {
         const paperH = Math.max(0, Math.min(H, cutY));
         paper.style.height = paperH + 'px';
         paper.style.opacity = paperH > 0.5 ? '1' : '0';
         paperArt.style.transform = 'translate3d(0,' + feed + 'px,0)';
         bar.style.top = cutY + 'px';
         bar.style.opacity = cutY < H + 4 && cutY > -barH - 2 ? '1' : '0';
-        pull.style.top = cutY + 'px';
-        const showPull = cutY < H - 2 && cutY > -barH * 0.35;
+        // Strips leave the slot at the bottom lip of the shredder, black behind them.
+        const exitY = cutY + barH - TUCK;
+        pull.style.top = exitY + 'px';
+        const room = Math.max(0, H - exitY);
+        pull.style.height = room + 8 + 'px';
+        const showPull = exitY > 2 && exitY < H - 1;
         pull.style.opacity = showPull ? '1' : '0';
-        // Art in strips continues from the cut; feed keeps continuity with sliding paper.
-        const artTop = -cutY + feed;
+        // Same mapping as the sheet: screen Y shows image Y - feed, including the
+        // span hidden inside the shredder.
+        const artTop = feed - exitY;
+        const grow = 0.28 + 0.72 * Math.max(0, Math.min(1, reveal));
+        const cap = Math.min(room, H * 0.62 * grow + 10);
         for (let i = 0; i < stripArts.length; i++) {
+          strips[i].style.height = Math.max(8, cap * lengthFrac[i]) + 'px';
           stripArts[i].style.transform = 'translate3d(0,' + artTop + 'px,0)';
         }
       };
 
-      // Start: shredder near bottom, sheet almost full, slight feed.
-      applyCut(H - barH * 0.35, 0);
+      // Start: shredder near bottom, sheet almost full, no feed yet.
+      applyCut(H - barH * 0.35, 0, 0);
 
       const t0 = performance.now();
       const tick = (now) => {
@@ -897,14 +983,14 @@
           // Shredder travels from near-bottom up and exits off the top.
           const cutY = H - barH * 0.35 - (H - barH * 0.35 + barH + 8) * e;
           // Sheet content feeds downward into the slot at the same time.
-          const feed = (H * 0.62) * e;
-          applyCut(cutY, feed);
+          const feed = (H * 0.38) * e;
+          applyCut(cutY, feed, e);
           if (raw < 1) {
             requestAnimationFrame(tick);
             return;
           }
           // Fully black — shredder gone.
-          applyCut(-barH - 10, H * 0.62);
+          applyCut(-barH - 10, H * 0.38, 1);
           pull.style.opacity = '0';
           bar.style.opacity = '0';
           paper.style.opacity = '0';
@@ -1142,7 +1228,7 @@
 
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js?v=29').catch(() => {});
+      navigator.serviceWorker.register('./sw.js?v=30').catch(() => {});
     });
   }
 
