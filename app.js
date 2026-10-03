@@ -702,18 +702,103 @@
     return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
   }
 
+  function canvasToPngBlob(source) {
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (blob) => {
+        if (settled) return;
+        settled = true;
+        resolve(blob || null);
+      };
+      const timer = window.setTimeout(() => finish(null), 700);
+      try {
+        // Synchronous encode so a missing toBlob callback cannot stall the shredder.
+        if (typeof source.toDataURL === 'function') {
+          const data = source.toDataURL('image/png');
+          const comma = data.indexOf(',');
+          const bin = atob(comma >= 0 ? data.slice(comma + 1) : '');
+          const arr = new Uint8Array(bin.length);
+          for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+          window.clearTimeout(timer);
+          finish(new Blob([arr], { type: 'image/png' }));
+          return;
+        }
+        if (typeof source.toBlob === 'function') {
+          source.toBlob((blob) => {
+            window.clearTimeout(timer);
+            finish(blob || null);
+          }, 'image/png');
+          return;
+        }
+        window.clearTimeout(timer);
+        finish(null);
+      } catch (_) {
+        window.clearTimeout(timer);
+        finish(null);
+      }
+    });
+  }
+
+  /**
+   * Copy the painted sheet before clearCanvas wipes it.
+   * The pixel copy is synchronous. Always resolves, never throws.
+   */
+  function sheetSnapshot() {
+    try {
+      const w = canvas.width;
+      const h = canvas.height;
+      if (!(w > 0) || !(h > 0)) return Promise.resolve(null);
+      const copy = document.createElement('canvas');
+      copy.width = w;
+      copy.height = h;
+      const cctx = copy.getContext('2d');
+      if (!cctx) return Promise.resolve(null);
+      cctx.fillStyle = '#ffffff';
+      cctx.fillRect(0, 0, w, h);
+      try {
+        cctx.drawImage(canvas, 0, 0);
+      } catch (_) {}
+      return canvasToPngBlob(copy);
+    } catch (_) {
+      return Promise.resolve(null);
+    }
+  }
+
   function runShredAnimation(blob) {
     return new Promise((resolve) => {
-      if (!blob || prefersReducedMotion()) {
+      let finished = false;
+      let url = '';
+      let layer = null;
+      const prevOverflow = stageEl.style.overflow;
+      const prevZ = stageEl.style.zIndex;
+      const prevBg = stageEl.style.background;
+      const cleanup = () => {
+        if (finished) return;
+        finished = true;
+        if (url) {
+          try { URL.revokeObjectURL(url); } catch (_) {}
+          url = '';
+        }
+        if (layer && layer.parentNode) layer.remove();
+        canvas.style.visibility = '';
+        if (templateOverlay) templateOverlay.style.visibility = '';
+        stageEl.style.overflow = prevOverflow;
+        stageEl.style.zIndex = prevZ;
+        stageEl.style.background = prevBg;
         resolve();
+      };
+
+      try {
+      if (prefersReducedMotion()) {
+        cleanup();
         return;
       }
       const rect = stageEl.getBoundingClientRect();
       if (!(rect.width > 2) || !(rect.height > 2)) {
-        resolve();
+        cleanup();
         return;
       }
-      const url = URL.createObjectURL(blob);
+      if (blob) url = URL.createObjectURL(blob);
       const W = rect.width;
       const H = rect.height;
       const barW = Math.round(W * 1.075);
@@ -724,7 +809,7 @@
       const HOLD_MS = 140;
       const FLIP_MS = 720;
 
-      const layer = document.createElement('div');
+      layer = document.createElement('div');
       layer.className = 'shred-fx';
       layer.setAttribute('aria-hidden', 'true');
 
@@ -732,7 +817,7 @@
       paper.className = 'shred-paper';
       const paperArt = document.createElement('div');
       paperArt.className = 'shred-art';
-      paperArt.style.backgroundImage = 'url("' + url + '")';
+      if (url) paperArt.style.backgroundImage = 'url("' + url + '")';
       paperArt.style.width = W + 'px';
       paperArt.style.height = H + 'px';
       paper.appendChild(paperArt);
@@ -752,7 +837,7 @@
         strip.style.setProperty('--pull', pulls[i] + 'px');
         const art = document.createElement('div');
         art.className = 'shred-art';
-        art.style.backgroundImage = 'url("' + url + '")';
+        if (url) art.style.backgroundImage = 'url("' + url + '")';
         art.style.width = W + 'px';
         art.style.height = H + 'px';
         art.style.left = -left + 'px';
@@ -776,29 +861,12 @@
       layer.appendChild(bar);
       layer.appendChild(page);
 
-      const prevOverflow = stageEl.style.overflow;
-      const prevZ = stageEl.style.zIndex;
-      const prevBg = stageEl.style.background;
       stageEl.style.overflow = 'hidden';
       stageEl.style.zIndex = '8';
       stageEl.style.background = '#000';
       canvas.style.visibility = 'hidden';
-      templateOverlay.style.visibility = 'hidden';
+      if (templateOverlay) templateOverlay.style.visibility = 'hidden';
       stageEl.appendChild(layer);
-
-      let finished = false;
-      const cleanup = () => {
-        if (finished) return;
-        finished = true;
-        URL.revokeObjectURL(url);
-        if (layer.parentNode) layer.remove();
-        canvas.style.visibility = '';
-        templateOverlay.style.visibility = '';
-        stageEl.style.overflow = prevOverflow;
-        stageEl.style.zIndex = prevZ;
-        stageEl.style.background = prevBg;
-        resolve();
-      };
 
       const applyCut = (cutY, feed) => {
         const paperH = Math.max(0, Math.min(H, cutY));
@@ -823,47 +891,68 @@
       const t0 = performance.now();
       const tick = (now) => {
         if (finished) return;
-        const raw = Math.min(1, (now - t0) / SHRED_MS);
-        const e = easeInOutCubic(raw);
-        // Shredder travels from near-bottom up and exits off the top.
-        const cutY = H - barH * 0.35 - (H - barH * 0.35 + barH + 8) * e;
-        // Sheet content feeds downward into the slot at the same time.
-        const feed = (H * 0.62) * e;
-        applyCut(cutY, feed);
-        if (raw < 1) {
-          requestAnimationFrame(tick);
-          return;
+        try {
+          const raw = Math.min(1, (now - t0) / SHRED_MS);
+          const e = easeInOutCubic(raw);
+          // Shredder travels from near-bottom up and exits off the top.
+          const cutY = H - barH * 0.35 - (H - barH * 0.35 + barH + 8) * e;
+          // Sheet content feeds downward into the slot at the same time.
+          const feed = (H * 0.62) * e;
+          applyCut(cutY, feed);
+          if (raw < 1) {
+            requestAnimationFrame(tick);
+            return;
+          }
+          // Fully black — shredder gone.
+          applyCut(-barH - 10, H * 0.62);
+          pull.style.opacity = '0';
+          bar.style.opacity = '0';
+          paper.style.opacity = '0';
+          window.setTimeout(() => {
+            if (finished) return;
+            page.classList.add('shred-page-flip');
+            window.setTimeout(cleanup, FLIP_MS + 40);
+          }, HOLD_MS);
+        } catch (_) {
+          cleanup();
         }
-        // Fully black — shredder gone.
-        applyCut(-barH - 10, H * 0.62);
-        pull.style.opacity = '0';
-        bar.style.opacity = '0';
-        paper.style.opacity = '0';
-        window.setTimeout(() => {
-          if (finished) return;
-          page.classList.add('shred-page-flip');
-          window.setTimeout(cleanup, FLIP_MS + 40);
-        }, HOLD_MS);
       };
       requestAnimationFrame(tick);
       // Safety net if rAF stalls (background tab).
       window.setTimeout(cleanup, SHRED_MS + HOLD_MS + FLIP_MS + 800);
+      } catch (_) {
+        cleanup();
+      }
     });
   }
 
   function shredAndClear() {
     if (shredding) return;
     shredding = true;
-    playShredSound(1.9);
-    const snap = sheetSnapshot();
-    // Empty the saved sheet immediately; the fx layer paints from the snapshot.
-    clearCanvas();
-    snap
+    // If anything in the chain never settles, painting must come back.
+    const unlockTimer = window.setTimeout(() => {
+      shredding = false;
+    }, 5200);
+    const done = () => {
+      window.clearTimeout(unlockTimer);
+      shredding = false;
+    };
+    try {
+      playShredSound(1.9);
+    } catch (_) {}
+    let snap;
+    try {
+      // Copies pixels synchronously, then resolves with a blob.
+      snap = sheetSnapshot();
+      clearCanvas();
+    } catch (_) {
+      try { clearCanvas(); } catch (__) {}
+      snap = Promise.resolve(null);
+    }
+    Promise.resolve(snap)
       .then((blob) => runShredAnimation(blob))
       .catch(() => {})
-      .then(() => {
-        shredding = false;
-      });
+      .then(done, done);
   }
 
   function clearCanvas() {
@@ -1053,7 +1142,7 @@
 
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js?v=27').catch(() => {});
+      navigator.serviceWorker.register('./sw.js?v=29').catch(() => {});
     });
   }
 
