@@ -891,17 +891,7 @@
         const sw = Math.max(4, col - gap);
         strip.style.left = left + 'px';
         strip.style.width = sw + 'px';
-        // Straight under the slot, torn along the bottom.
-        const teeth = 5;
-        const pts = ['0% 0%', '100% 0%'];
-        for (let k = teeth; k >= 0; k--) {
-          const x = (k / teeth) * 100;
-          const wave = 70 + ((i * 13 + k * 23) % 30);
-          pts.push(x.toFixed(1) + '% ' + wave + '%');
-        }
-        const clip = 'polygon(' + pts.join(',') + ')';
-        strip.style.clipPath = clip;
-        strip.style.webkitClipPath = clip;
+        // Straight cut at the bottom — no torn fringe.
         const art = document.createElement('div');
         art.className = 'shred-art';
         if (url) art.style.backgroundImage = 'url("' + url + '")';
@@ -1228,7 +1218,7 @@
 
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js?v=30').catch(() => {});
+      navigator.serviceWorker.register('./sw.js?v=31').catch(() => {});
     });
   }
 
