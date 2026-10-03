@@ -238,7 +238,7 @@ body {
   min-height: 0;
   max-width: var(--btn);
   max-height: var(--btn);
-  border-radius: 0.28cm;
+  border-radius: 50%;
   border: 0.1cm solid #333;
   background: #1a1a1a;
   cursor: pointer;
@@ -373,4 +373,229 @@ body {
     --rail-inset-canvas: 0.28cm;
     --stage-margin: 0.08cm;
   }
+}
+
+/* Collapsed rails: only the cropped wheel. Open rails: buttons, no wheel. */
+#app:not(.colors-open) #swatches,
+#app:not(.colors-open) #clear-btn {
+  display: none;
+}
+
+#app.colors-open #color-wheel {
+  display: none;
+}
+
+#app:not(.templates-open) #template-btns {
+  display: none;
+}
+
+#app.templates-open #template-wheel {
+  display: none;
+}
+
+:root {
+  --wheel: 15cm;
+  --peek: 1.38cm;
+}
+
+.edge-wheel {
+  position: absolute;
+  width: var(--wheel);
+  height: var(--wheel);
+  border-radius: 50%;
+  border: 0;
+  padding: 0;
+  z-index: 4;
+  overflow: hidden;
+  touch-action: none;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  color: #f4f4f5;
+  box-shadow:
+    0 0 0 0.1cm #0a0a0a,
+    0 0 0 0.18cm rgba(255, 255, 255, 0.94),
+    inset 0 0 0 0.1cm rgba(0, 0, 0, 0.28);
+}
+
+.color-wheel {
+  background: conic-gradient(from 0deg,
+    #141414 0deg 48deg,
+    #E63946 54deg,
+    #FF8C42 64deg,
+    #FFD60A 74deg,
+    #52B788 84deg,
+    #00B4D8 94deg,
+    #4361EE 104deg,
+    #9B5DE5 114deg,
+    #FF6B9D 124deg,
+    #8B5E3C 132deg,
+    #4A4A4A 139deg,
+    #ffffff 146deg,
+    #141414 156deg 360deg);
+}
+
+.color-wheel::after,
+.tpl-wheel::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.color-wheel::after {
+  background: radial-gradient(circle at 70% 50%, rgba(255, 255, 255, 0.22), transparent 28%);
+}
+
+.tpl-wheel {
+  background: radial-gradient(circle at 18% 50%, #2c2c2c 0%, #141414 42%, #0c0c0c 100%);
+}
+
+.tpl-wheel::after {
+  background: radial-gradient(circle at 16% 46%, rgba(255, 255, 255, 0.14), transparent 26%);
+}
+
+@media (orientation: landscape) {
+  #color-wheel {
+    left: calc(var(--peek) - var(--wheel));
+    top: 50%;
+    margin-top: calc(var(--wheel) / -2);
+  }
+
+  #template-wheel {
+    right: calc(var(--peek) - var(--wheel));
+    top: 50%;
+    margin-top: calc(var(--wheel) / -2);
+  }
+}
+
+@media (orientation: portrait) {
+  .color-wheel {
+    background: conic-gradient(from 0deg,
+      #4361EE 0deg,
+      #9B5DE5 10deg,
+      #FF6B9D 20deg,
+      #8B5E3C 28deg,
+      #4A4A4A 35deg,
+      #ffffff 42deg,
+      #141414 50deg 310deg,
+      #E63946 318deg,
+      #FF8C42 330deg,
+      #FFD60A 342deg,
+      #52B788 352deg,
+      #00B4D8 358deg,
+      #4361EE 360deg);
+  }
+
+  .color-wheel::after {
+    background: radial-gradient(circle at 50% 22%, rgba(255, 255, 255, 0.22), transparent 28%);
+  }
+
+  .tpl-wheel {
+    background: radial-gradient(circle at 50% 82%, #2c2c2c 0%, #141414 42%, #0c0c0c 100%);
+  }
+
+  .tpl-wheel::after {
+    background: radial-gradient(circle at 50% 84%, rgba(255, 255, 255, 0.14), transparent 26%);
+  }
+
+  #color-wheel {
+    bottom: calc(var(--peek) - var(--wheel));
+    left: 50%;
+    margin-left: calc(var(--wheel) / -2);
+  }
+
+  #template-wheel {
+    top: calc(var(--peek) - var(--wheel));
+    left: 50%;
+    margin-left: calc(var(--wheel) / -2);
+  }
+}
+
+.wheel-grip {
+  position: absolute;
+  z-index: 6;
+  width: 0.68cm;
+  height: 0.68cm;
+  border-radius: 50%;
+  background: rgba(0, 0, 0, 0.55);
+  box-shadow: 0 0.02cm 0.08cm rgba(0, 0, 0, 0.45), inset 0 0 0 0.04cm rgba(255, 255, 255, 0.95);
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+}
+
+.wheel-grip svg {
+  width: 0.4cm;
+  height: 0.4cm;
+  display: block;
+}
+
+.color-wheel .wheel-grip {
+  right: 0.2cm;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.tpl-wheel .wheel-grip {
+  left: 0.2cm;
+  top: 50%;
+  transform: translateY(-50%) rotate(180deg);
+}
+
+@media (orientation: portrait) {
+  .color-wheel .wheel-grip {
+    right: auto;
+    left: 50%;
+    top: 0.2cm;
+    transform: translateX(-50%) rotate(-90deg);
+  }
+
+  .tpl-wheel .wheel-grip {
+    left: 50%;
+    top: auto;
+    bottom: 0.2cm;
+    transform: translateX(-50%) rotate(90deg);
+  }
+}
+
+/* Pictures in the collapsed template disc: no button ring. */
+#peek-pics {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.peek-pic {
+  position: absolute;
+  width: 1.28cm;
+  height: 1.28cm;
+  margin: 0;
+  border: 0;
+  background: none;
+  box-shadow: none;
+  transform: translate(-50%, -50%) rotate(var(--icon-rot, 0deg));
+  color: #f7f7f7;
+}
+
+.peek-pic svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* Along the visible rim. Outer pair sits on the circumference so the disc crops them. */
+@media (orientation: landscape) {
+  .peek-pic:nth-child(1) { left: 6.1%; top: 26%; }
+  .peek-pic:nth-child(2) { left: 1.6%; top: 40%; }
+  .peek-pic:nth-child(3) { left: 1.6%; top: 60%; }
+  .peek-pic:nth-child(4) { left: 6.1%; top: 74%; }
+}
+
+@media (orientation: portrait) {
+  .peek-pic:nth-child(1) { left: 26%; top: 93.9%; }
+  .peek-pic:nth-child(2) { left: 40%; top: 98.6%; }
+  .peek-pic:nth-child(3) { left: 60%; top: 98.6%; }
+  .peek-pic:nth-child(4) { left: 74%; top: 93.9%; }
 }

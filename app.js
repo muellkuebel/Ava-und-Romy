@@ -141,6 +141,13 @@
   const stageWrap = document.getElementById('stage-wrap');
   const templateOverlay = document.getElementById('template-overlay');
   const templateBtnsEl = document.getElementById('template-btns');
+  const colorWheel = document.getElementById('color-wheel');
+  const templateWheel = document.getElementById('template-wheel');
+  const peekPicsEl = document.getElementById('peek-pics');
+
+  const PEEK_IDS = ['blume', 'sonne', 'haus', 'traktor'];
+  /* After a wheel opens, ignore the click that lands on a button underneath. */
+  let suppressRailClick = false;
 
   let currentColor = COLORS[0].hex;
   let currentTemplateId = TEMPLATES[0].id;
@@ -271,6 +278,7 @@
       // pointerdown: Farbe auch wechseln, während ein anderer Finger noch malt
       // (iOS liefert oft keinen click, solange eine Touch-Geste aktiv ist)
       const pick = (e) => {
+        if (suppressRailClick && e.type === 'click') return;
         e.preventDefault();
         e.stopPropagation();
         selectColor(c.hex, btn);
@@ -279,6 +287,41 @@
       btn.addEventListener('click', pick);
       swatchesEl.appendChild(btn);
     });
+  }
+
+  function buildPeek() {
+    if (!peekPicsEl) return;
+    peekPicsEl.innerHTML = PEEK_IDS.map((id) => {
+      const t = getTemplate(id);
+      return '<span class="peek-pic">' + templateSvgMarkup(t, false) + '</span>';
+    }).join('');
+  }
+
+  function openRail(which) {
+    appEl.classList.add(which === 'colors' ? 'colors-open' : 'templates-open');
+    const wheel = which === 'colors' ? colorWheel : templateWheel;
+    if (wheel) wheel.setAttribute('aria-expanded', 'true');
+    suppressRailClick = true;
+    window.setTimeout(() => {
+      suppressRailClick = false;
+    }, 450);
+  }
+
+  function closeRails() {
+    appEl.classList.remove('colors-open', 'templates-open');
+    if (colorWheel) colorWheel.setAttribute('aria-expanded', 'false');
+    if (templateWheel) templateWheel.setAttribute('aria-expanded', 'false');
+  }
+
+  function bindWheel(el, which) {
+    if (!el) return;
+    const go = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openRail(which);
+    };
+    el.addEventListener('pointerdown', go);
+    el.addEventListener('click', go);
   }
 
   function buildTemplates() {
@@ -294,6 +337,7 @@
       btn.dataset.template = t.id;
       btn.innerHTML = templateSvgMarkup(t, false);
       const pick = (e) => {
+        if (suppressRailClick && e.type === 'click') return;
         e.preventDefault();
         e.stopPropagation();
         selectTemplate(t.id, btn);
@@ -302,6 +346,7 @@
       btn.addEventListener('click', pick);
       templateBtnsEl.appendChild(btn);
     });
+    buildPeek();
   }
 
   function selectColor(hex, btn) {
@@ -444,46 +489,88 @@
     document.documentElement.style.setProperty('--icon-rot', '0deg');
   }
 
-  function canvasPoint(e) {
+  function isUiEvent(e) {
+    const t = e.target;
+    if (!t || !t.closest) return false;
+    return !!t.closest('#color-wheel, #template-wheel, .swatch, .template-btn, #clear-btn');
+  }
+
+  /** Canvas bitmap point. `inside` is the white sheet (CSS box), not the black bezel. */
+  function canvasPointFromClient(clientX, clientY) {
     const rect = canvas.getBoundingClientRect();
-    return {
-      x: (e.clientX - rect.left) * dpr,
-      y: (e.clientY - rect.top) * dpr,
-    };
+    if (!(rect.width > 0) || !(rect.height > 0)) {
+      return { x: 0, y: 0, inside: false };
+    }
+    const x = (clientX - rect.left) * (canvas.width / rect.width);
+    const y = (clientY - rect.top) * (canvas.height / rect.height);
+    const inside =
+      clientX >= rect.left &&
+      clientX <= rect.right &&
+      clientY >= rect.top &&
+      clientY <= rect.bottom;
+    return { x, y, inside };
+  }
+
+  function segmentHitsCanvas(x0, y0, x1, y1) {
+    const w = canvas.width;
+    const h = canvas.height;
+    if (Math.max(x0, x1) < 0 || Math.max(y0, y1) < 0) return false;
+    if (Math.min(x0, x1) > w || Math.min(y0, y1) > h) return false;
+    return true;
   }
 
   function startStroke(e) {
+    if (isUiEvent(e)) return;
     if (activePointers.has(e.pointerId)) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
+    e.preventDefault();
 
-    const p = canvasPoint(e);
-    activePointers.set(e.pointerId, { lastX: p.x, lastY: p.y });
+    // Painting (even if the finger is still on the black bezel) puts the rails away.
+    closeRails();
 
-    applyStrokeStyle();
-    // Filled circle for tap — avoids short-line + first-move double paint
-    paintTapDot(p.x, p.y);
+    const p = canvasPointFromClient(e.clientX, e.clientY);
+    activePointers.set(e.pointerId, {
+      lastX: p.x,
+      lastY: p.y,
+      inside: p.inside,
+      painted: p.inside,
+    });
+
+    if (p.inside) {
+      applyStrokeStyle();
+      // Filled circle for tap — avoids short-line + first-move double paint
+      paintTapDot(p.x, p.y);
+    }
 
     try {
-      canvas.setPointerCapture(e.pointerId);
+      appEl.setPointerCapture(e.pointerId);
     } catch (_) {}
   }
 
   function moveStroke(e) {
     const state = activePointers.get(e.pointerId);
     if (!state) return;
-    const p = canvasPoint(e);
-    applyStrokeStyle();
-    strokeSegment(state.lastX, state.lastY, p.x, p.y);
+    const p = canvasPointFromClient(e.clientX, e.clientY);
+    // Ink stays on the bitmap. A stroke that starts on the black bezel is clipped
+    // to the sheet as soon as the segment crosses onto it.
+    if (segmentHitsCanvas(state.lastX, state.lastY, p.x, p.y)) {
+      applyStrokeStyle();
+      strokeSegment(state.lastX, state.lastY, p.x, p.y);
+      state.painted = true;
+    }
     state.lastX = p.x;
     state.lastY = p.y;
+    state.inside = p.inside;
   }
 
   function endStroke(e) {
-    if (!activePointers.has(e.pointerId)) return;
+    const state = activePointers.get(e.pointerId);
+    if (!state) return;
     activePointers.delete(e.pointerId);
     try {
-      canvas.releasePointerCapture(e.pointerId);
+      appEl.releasePointerCapture(e.pointerId);
     } catch (_) {}
+    if (!state.painted) return;
     // Persist when this finger lifts (others may still be drawing)
     saveCurrentToBuffer();
     persistToStorage();
@@ -607,23 +694,22 @@
       });
   }
 
-  // Pointer events
-  canvas.addEventListener('pointerdown', startStroke);
-  canvas.addEventListener('pointermove', moveStroke);
-  canvas.addEventListener('pointerup', endStroke);
-  canvas.addEventListener('pointercancel', endStroke);
-  canvas.addEventListener('pointerleave', (e) => {
-    if (activePointers.has(e.pointerId)) endStroke(e);
-  });
+  // Pointer events on the whole app, so a stroke may start on the black bezel
+  // and continue onto the white sheet. The sheet clips the ink.
+  document.addEventListener('pointerdown', startStroke);
+  document.addEventListener('pointermove', moveStroke);
+  document.addEventListener('pointerup', endStroke);
+  document.addEventListener('pointercancel', endStroke);
 
-  canvas.addEventListener(
+  document.addEventListener(
     'touchstart',
     (e) => {
+      if (isUiEvent(e)) return;
       e.preventDefault();
     },
     { passive: false }
   );
-  canvas.addEventListener(
+  document.addEventListener(
     'touchmove',
     (e) => {
       e.preventDefault();
@@ -632,20 +718,13 @@
   );
 
   const clearPick = (e) => {
+    if (suppressRailClick && e.type === 'click') return;
     e.preventDefault();
     e.stopPropagation();
     clearCanvas();
   };
   clearBtn.addEventListener('pointerdown', clearPick);
   clearBtn.addEventListener('click', clearPick);
-
-  document.addEventListener(
-    'touchmove',
-    (e) => {
-      e.preventDefault();
-    },
-    { passive: false }
-  );
 
   let resizeTimer = null;
   function onResize() {
@@ -675,7 +754,7 @@
 
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js?v=24').catch(() => {});
+      navigator.serviceWorker.register('./sw.js?v=25').catch(() => {});
     });
   }
 
@@ -696,6 +775,9 @@
       persistToStorageNow();
     }
   });
+
+  bindWheel(colorWheel, 'colors');
+  bindWheel(templateWheel, 'templates');
 
   // Init
   buildPalette();
