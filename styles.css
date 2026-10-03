@@ -42,6 +42,8 @@ body {
   /* Invisible wheel hit: extra depth toward the sheet, past the visible sliver */
   --hit-extra: 1.05cm;
   --hit-span: 11cm;
+  /* Extra invisible hit on open buttons, toward the sheet only (inside the rail inset) */
+  --btn-hit-side: 0.3cm;
 }
 
 #app {
@@ -672,6 +674,24 @@ body {
     margin-top: -3px;
     margin-bottom: -3px;
   }
+
+  /* Invisible hit grows right (colors) / left (templates) toward the sheet. */
+  #palette .swatch::before,
+  #templates .template-btn::before {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: var(--btn-hit-side);
+  }
+
+  #palette .swatch::before {
+    left: 100%;
+  }
+
+  #templates .template-btn::before {
+    right: 100%;
+  }
 }
 
 @media (orientation: portrait) {
@@ -703,6 +723,24 @@ body {
   #templates .template-btn {
     margin-left: -3px;
     margin-right: -3px;
+  }
+
+  /* Invisible hit grows up (colors) / down (templates) toward the sheet. */
+  #palette .swatch::before,
+  #templates .template-btn::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    right: 0;
+    height: var(--btn-hit-side);
+  }
+
+  #palette .swatch::before {
+    bottom: 100%;
+  }
+
+  #templates .template-btn::before {
+    top: 100%;
   }
 }
 
