@@ -1,5 +1,5 @@
 /* Service worker — cache all app assets for offline use */
-const CACHE = 'kinder-mal-app-v31';
+const CACHE = 'kinder-mal-app-v32';
 const ASSETS = [
   './',
   './index.html',

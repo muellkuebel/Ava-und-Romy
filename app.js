@@ -862,6 +862,7 @@
       const stripN = 16;
       const lengthFrac = [0.62, 1, 0.74, 0.93, 0.58, 0.86, 0.7, 0.98, 0.66, 0.9, 0.78, 0.84, 0.6, 0.96, 0.72, 0.88];
       const SHRED_MS = 1900;
+      const FALL_MS = 900;
       const HOLD_MS = 140;
       const FLIP_MS = 720;
 
@@ -871,9 +872,11 @@
 
       const paper = document.createElement('div');
       paper.className = 'shred-paper';
-      const paperArt = document.createElement('div');
+      const paperArt = document.createElement('img');
       paperArt.className = 'shred-art';
-      if (url) paperArt.style.backgroundImage = 'url("' + url + '")';
+      paperArt.alt = '';
+      paperArt.draggable = false;
+      if (url) paperArt.src = url;
       paperArt.style.width = W + 'px';
       paperArt.style.height = H + 'px';
       paper.appendChild(paperArt);
@@ -892,9 +895,11 @@
         strip.style.left = left + 'px';
         strip.style.width = sw + 'px';
         // Straight cut at the bottom — no torn fringe.
-        const art = document.createElement('div');
+        const art = document.createElement('img');
         art.className = 'shred-art';
-        if (url) art.style.backgroundImage = 'url("' + url + '")';
+        art.alt = '';
+        art.draggable = false;
+        if (url) art.src = url;
         art.style.width = W + 'px';
         art.style.height = H + 'px';
         art.style.left = -left + 'px';
@@ -928,13 +933,6 @@
       layer.appendChild(bar);
       layer.appendChild(page);
 
-      stageEl.style.overflow = 'hidden';
-      stageEl.style.zIndex = '8';
-      stageEl.style.background = '#000';
-      canvas.style.visibility = 'hidden';
-      if (templateOverlay) templateOverlay.style.visibility = 'hidden';
-      stageEl.appendChild(layer);
-
       const TUCK = 3;
       const applyCut = (cutY, feed, reveal) => {
         const paperH = Math.max(0, Math.min(H, cutY));
@@ -948,23 +946,34 @@
         pull.style.top = exitY + 'px';
         const room = Math.max(0, H - exitY);
         pull.style.height = room + 8 + 'px';
-        const showPull = exitY > 2 && exitY < H - 1;
-        pull.style.opacity = showPull ? '1' : '0';
         // Same mapping as the sheet: screen Y shows image Y - feed, including the
         // span hidden inside the shredder.
         const artTop = feed - exitY;
         const grow = 0.28 + 0.72 * Math.max(0, Math.min(1, reveal));
         const cap = Math.min(room, H * 0.62 * grow + 10);
+        // Stay visible while any of the strip still overlaps the sheet,
+        // including once the slot has slipped just past the top edge.
+        const showPull = exitY < H - 1 && exitY + Math.max(cap, 12) > -2;
+        pull.style.opacity = showPull ? '1' : '0';
         for (let i = 0; i < stripArts.length; i++) {
           strips[i].style.height = Math.max(8, cap * lengthFrac[i]) + 'px';
           stripArts[i].style.transform = 'translate3d(0,' + artTop + 'px,0)';
         }
       };
 
-      // Start: shredder near bottom, sheet almost full, no feed yet.
-      applyCut(H - barH * 0.35, 0, 0);
-
-      const t0 = performance.now();
+      // Cover the live sheet only once the snapshot can paint, then wipe
+      // underneath. Clearing earlier flashes a blank page.
+      const startVisual = () => {
+        if (finished) return;
+        stageEl.style.overflow = 'hidden';
+        stageEl.style.zIndex = '8';
+        stageEl.style.background = '#000';
+        stageEl.appendChild(layer);
+        applyCut(H - barH * 0.35, 0, 0);
+        canvas.style.visibility = 'hidden';
+        if (templateOverlay) templateOverlay.style.visibility = 'hidden';
+        try { clearCanvas(); } catch (_) {}
+        const t0 = performance.now();
       const tick = (now) => {
         if (finished) return;
         try {
@@ -979,23 +988,61 @@
             requestAnimationFrame(tick);
             return;
           }
-          // Fully black — shredder gone.
+          // Shredder has left the top. Strips drop straight down off the sheet.
           applyCut(-barH - 10, H * 0.38, 1);
-          pull.style.opacity = '0';
           bar.style.opacity = '0';
           paper.style.opacity = '0';
-          window.setTimeout(() => {
+          pull.style.opacity = '1';
+          pull.style.overflow = 'visible';
+          let maxStrip = 0;
+          for (let i = 0; i < strips.length; i++) {
+            maxStrip = Math.max(maxStrip, strips[i].offsetHeight || 0);
+          }
+          pull.style.height = maxStrip + 4 + 'px';
+          const fromTop = parseFloat(pull.style.top) || 0;
+          const distance = H - fromTop + 12;
+          const tFall = performance.now();
+          const fallTick = (now2) => {
             if (finished) return;
-            page.classList.add('shred-page-flip');
-            window.setTimeout(cleanup, FLIP_MS + 40);
-          }, HOLD_MS);
+            const fraw = Math.min(1, (now2 - tFall) / FALL_MS);
+            const g = fraw * fraw;
+            pull.style.top = fromTop + distance * g + 'px';
+            if (fraw < 1) {
+              requestAnimationFrame(fallTick);
+              return;
+            }
+            pull.style.opacity = '0';
+            window.setTimeout(() => {
+              if (finished) return;
+              page.classList.add('shred-page-flip');
+              window.setTimeout(cleanup, FLIP_MS + 40);
+            }, HOLD_MS);
+          };
+          requestAnimationFrame(fallTick);
         } catch (_) {
           cleanup();
         }
       };
-      requestAnimationFrame(tick);
-      // Safety net if rAF stalls (background tab).
-      window.setTimeout(cleanup, SHRED_MS + HOLD_MS + FLIP_MS + 800);
+        requestAnimationFrame(tick);
+        window.setTimeout(cleanup, SHRED_MS + FALL_MS + HOLD_MS + FLIP_MS + 800);
+      };
+
+      if (!url) {
+        startVisual();
+      } else {
+        const preload = new Image();
+        let started = false;
+        const go = () => {
+          if (started) return;
+          started = true;
+          startVisual();
+        };
+        preload.onload = go;
+        preload.onerror = go;
+        preload.src = url;
+        if (preload.complete && preload.naturalWidth > 0) go();
+        window.setTimeout(go, 500);
+      }
       } catch (_) {
         cleanup();
       }
@@ -1008,7 +1055,7 @@
     // If anything in the chain never settles, painting must come back.
     const unlockTimer = window.setTimeout(() => {
       shredding = false;
-    }, 5200);
+    }, 6400);
     const done = () => {
       window.clearTimeout(unlockTimer);
       shredding = false;
@@ -1019,16 +1066,21 @@
     let snap;
     try {
       // Copies pixels synchronously, then resolves with a blob.
+      // The live canvas stays until the shred layer covers it.
       snap = sheetSnapshot();
-      clearCanvas();
     } catch (_) {
-      try { clearCanvas(); } catch (__) {}
       snap = Promise.resolve(null);
     }
     Promise.resolve(snap)
       .then((blob) => runShredAnimation(blob))
       .catch(() => {})
-      .then(done, done);
+      .then(() => {
+        try { clearCanvas(); } catch (_) {}
+        done();
+      }, () => {
+        try { clearCanvas(); } catch (_) {}
+        done();
+      });
   }
 
   function clearCanvas() {
