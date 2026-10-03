@@ -38,6 +38,10 @@ body {
   /* Extra inset from white canvas so button borders aren't eaten */
   --rail-inset-canvas: 0.36cm;
   --rail-inset-outer: 0.1cm;
+  --rail-motion: 220ms;
+  /* Invisible wheel hit: extra depth toward the sheet, past the visible sliver */
+  --hit-extra: 1.05cm;
+  --hit-span: 11cm;
 }
 
 #app {
@@ -89,7 +93,7 @@ body {
   grid-area: palette;
   background: #000;
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: space-evenly;
   gap: var(--btn-gap);
   /* Default = landscape: outer (left) small, canvas (right) larger inset */
@@ -118,28 +122,43 @@ body {
   display: contents;
 }
 
+/* Hit box fills the gap to the next color. The painted circle stays --btn. */
 .swatch {
-  width: var(--btn);
-  height: var(--btn);
+  flex: 1 1 0;
+  width: auto;
+  height: auto;
   min-width: 0;
   min-height: 0;
-  max-width: var(--btn);
-  max-height: var(--btn);
-  border-radius: 50%;
-  border: 0.1cm solid transparent;
-  background: var(--c);
+  max-width: none;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
   cursor: pointer;
-  flex: 0 0 auto;
-  aspect-ratio: 1;
-  transition: transform 0.12s ease, box-shadow 0.12s ease, border-width 0.12s ease;
-  box-shadow: inset 0 -0.06cm 0.1cm rgba(0, 0, 0, 0.25);
+  aspect-ratio: auto;
+  display: grid;
+  place-items: center;
   touch-action: manipulation;
   appearance: none;
   -webkit-appearance: none;
   padding: 0;
+  position: relative;
+  z-index: 1;
 }
 
-.swatch.white {
+.swatch-face {
+  width: var(--btn);
+  height: var(--btn);
+  border-radius: 50%;
+  border: 0.1cm solid transparent;
+  background: var(--c);
+  box-shadow: inset 0 -0.06cm 0.1cm rgba(0, 0, 0, 0.25);
+  pointer-events: none;
+  transition: transform 0.12s ease, box-shadow 0.12s ease, border-color 0.12s ease;
+}
+
+.swatch.white .swatch-face {
   border-color: #555;
   box-shadow:
     inset 0 -0.06cm 0.1cm rgba(0, 0, 0, 0.12),
@@ -147,16 +166,18 @@ body {
 }
 
 .swatch.active {
+  z-index: 2;
+}
+
+.swatch.active .swatch-face {
   border: 0.14cm solid #fff;
   transform: scale(1.12);
   box-shadow:
     0 0 0 0.06cm rgba(255, 255, 255, 0.35),
     inset 0 -0.06cm 0.1cm rgba(0, 0, 0, 0.2);
-  z-index: 1;
-  flex-shrink: 0;
 }
 
-.swatch.white.active {
+.swatch.white.active .swatch-face {
   border-color: #fff;
   box-shadow:
     0 0 0 0.06cm rgba(255, 255, 255, 0.5),
@@ -165,6 +186,26 @@ body {
 }
 
 #clear-btn {
+  flex: 1 1 0;
+  width: auto;
+  height: auto;
+  min-width: 0;
+  min-height: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: #888;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  touch-action: manipulation;
+  z-index: 2;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.clear-face {
   width: calc(var(--btn) * 0.85);
   height: calc(var(--btn) * 0.85);
   min-width: 0.85cm;
@@ -172,19 +213,16 @@ body {
   border-radius: 50%;
   border: 0.07cm solid #444;
   background: #1a1a1a;
-  color: #888;
-  cursor: pointer;
-  flex: 0 0 auto;
+  color: inherit;
   display: grid;
   place-items: center;
   padding: 0.15cm;
-  touch-action: manipulation;
+  pointer-events: none;
   transition: color 0.12s, border-color 0.12s, background 0.12s;
-  z-index: 2;
 }
 
-#clear-btn:active,
-#clear-btn:hover {
+#clear-btn:active .clear-face,
+#clear-btn:hover .clear-face {
   color: #fff;
   border-color: #888;
   background: #2a2a2a;
@@ -195,7 +233,7 @@ body {
   grid-area: templates;
   background: #000;
   display: flex;
-  align-items: center;
+  align-items: stretch;
   justify-content: space-evenly;
   gap: var(--btn-gap);
   /* Default = landscape: canvas (left) larger inset, outer (right) small */
@@ -232,27 +270,42 @@ body {
 }
 
 .template-btn {
-  width: var(--btn);
-  height: var(--btn);
+  flex: 1 1 0;
+  width: auto;
+  height: auto;
   min-width: 0;
   min-height: 0;
-  max-width: var(--btn);
-  max-height: var(--btn);
-  border-radius: 50%;
-  border: 0.1cm solid #333;
-  background: #1a1a1a;
+  max-width: none;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
   cursor: pointer;
-  flex: 0 0 auto;
-  aspect-ratio: 1;
-  padding: 0.12cm;
+  aspect-ratio: auto;
+  padding: 0;
   touch-action: manipulation;
   appearance: none;
   -webkit-appearance: none;
   display: grid;
   place-items: center;
-  transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease;
   color: #ddd;
+  overflow: visible;
+  position: relative;
+  z-index: 1;
+}
+
+.tpl-face {
+  width: var(--btn);
+  height: var(--btn);
+  border-radius: 50%;
+  border: 0.1cm solid #333;
+  background: #1a1a1a;
+  display: grid;
+  place-items: center;
+  padding: 0.12cm;
   overflow: hidden;
+  pointer-events: none;
+  transition: transform 0.12s ease, border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease;
 }
 
 .template-btn svg {
@@ -266,15 +319,17 @@ body {
 }
 
 .template-btn.active {
+  z-index: 2;
+}
+
+.template-btn.active .tpl-face {
   border-color: #fff;
   background: #2a2a2a;
   transform: scale(1.1);
-  z-index: 1;
-  flex-shrink: 0;
   box-shadow: 0 0 0 0.06cm rgba(255, 255, 255, 0.3);
 }
 
-.template-btn:active {
+.template-btn:active .tpl-face {
   background: #333;
 }
 
@@ -375,23 +430,7 @@ body {
   }
 }
 
-/* Collapsed rails: only the cropped wheel. Open rails: buttons, no wheel. */
-#app:not(.colors-open) #swatches,
-#app:not(.colors-open) #clear-btn {
-  display: none;
-}
-
-#app.colors-open #color-wheel {
-  display: none;
-}
-
-#app:not(.templates-open) #template-btns {
-  display: none;
-}
-
-#app.templates-open #template-wheel {
-  display: none;
-}
+/* Rails stay in the layout so they can fly. Closed = off the outer edge. */
 
 :root {
   --wheel: 15cm;
@@ -514,16 +553,7 @@ body {
 }
 
 .wheel-grip {
-  position: absolute;
-  z-index: 6;
-  width: 0.68cm;
-  height: 0.68cm;
-  border-radius: 50%;
-  background: rgba(0, 0, 0, 0.55);
-  box-shadow: 0 0.02cm 0.08cm rgba(0, 0, 0, 0.45), inset 0 0 0 0.04cm rgba(255, 255, 255, 0.95);
-  display: grid;
-  place-items: center;
-  pointer-events: none;
+  display: none;
 }
 
 .wheel-grip svg {
@@ -598,4 +628,192 @@ body {
   .peek-pic:nth-child(2) { left: 40%; top: 98.6%; }
   .peek-pic:nth-child(3) { left: 60%; top: 98.6%; }
   .peek-pic:nth-child(4) { left: 74%; top: 93.9%; }
+}
+
+/* Snappy rail motion. Enabled after first paint so load does not animate. */
+#app.motion-on .swatch,
+#app.motion-on #clear-btn,
+#app.motion-on .template-btn,
+#app.motion-on .edge-wheel {
+  transition:
+    transform var(--rail-motion) ease-out,
+    opacity calc(var(--rail-motion) - 30ms) ease-out,
+    visibility 0s linear 0s;
+}
+
+@media (orientation: landscape) {
+  #app:not(.colors-open) #palette .swatch,
+  #app:not(.colors-open) #palette #clear-btn {
+    transform: translate3d(-125%, 0, 0);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  #app:not(.templates-open) #templates .template-btn {
+    transform: translate3d(125%, 0, 0);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  #app.colors-open #color-wheel {
+    transform: translate3d(calc(-1 * (var(--peek) + 2.2cm)), 0, 0);
+  }
+
+  #app.templates-open #template-wheel {
+    transform: translate3d(calc(var(--peek) + 2.2cm), 0, 0);
+  }
+
+  /* Overlap a hair so a toddler press between two circles still hits one. */
+  #palette .swatch,
+  #palette #clear-btn,
+  #templates .template-btn {
+    margin-top: -3px;
+    margin-bottom: -3px;
+  }
+}
+
+@media (orientation: portrait) {
+  #app:not(.colors-open) #palette .swatch,
+  #app:not(.colors-open) #palette #clear-btn {
+    transform: translate3d(0, 125%, 0);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  #app:not(.templates-open) #templates .template-btn {
+    transform: translate3d(0, -125%, 0);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+  }
+
+  #app.colors-open #color-wheel {
+    transform: translate3d(0, calc(var(--peek) + 2.2cm), 0);
+  }
+
+  #app.templates-open #template-wheel {
+    transform: translate3d(0, calc(-1 * (var(--peek) + 2.2cm)), 0);
+  }
+
+  #palette .swatch,
+  #palette #clear-btn,
+  #templates .template-btn {
+    margin-left: -3px;
+    margin-right: -3px;
+  }
+}
+
+#app.motion-on:not(.colors-open) #palette .swatch,
+#app.motion-on:not(.colors-open) #palette #clear-btn,
+#app.motion-on:not(.templates-open) #templates .template-btn,
+#app.motion-on.colors-open #color-wheel,
+#app.motion-on.templates-open #template-wheel {
+  transition:
+    transform var(--rail-motion) ease-out,
+    opacity calc(var(--rail-motion) - 40ms) ease-out,
+    visibility 0s linear var(--rail-motion);
+}
+
+#app.colors-open #color-wheel,
+#app.templates-open #template-wheel {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+/* Bigger invisible target for the collapsed discs. Visual wheel is unchanged. */
+.wheel-hit {
+  position: absolute;
+  z-index: 6;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: transparent;
+  touch-action: none;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.wheel-hit:focus {
+  outline: none;
+}
+
+@media (orientation: landscape) {
+  #color-wheel-hit {
+    left: 0;
+    top: 50%;
+    width: calc(var(--peek) + var(--hit-extra));
+    height: var(--hit-span);
+    transform: translateY(-50%);
+  }
+
+  #template-wheel-hit {
+    right: 0;
+    top: 50%;
+    width: calc(var(--peek) + var(--hit-extra));
+    height: var(--hit-span);
+    transform: translateY(-50%);
+  }
+}
+
+@media (orientation: portrait) {
+  #color-wheel-hit {
+    left: 50%;
+    bottom: 0;
+    width: var(--hit-span);
+    height: calc(var(--peek) + var(--hit-extra));
+    transform: translateX(-50%);
+  }
+
+  #template-wheel-hit {
+    left: 50%;
+    top: 0;
+    width: var(--hit-span);
+    height: calc(var(--peek) + var(--hit-extra));
+    transform: translateX(-50%);
+  }
+}
+
+#app.colors-open #color-wheel-hit,
+#app.templates-open #template-wheel-hit {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.shred-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.shred-strip {
+  position: absolute;
+  top: 0;
+  height: 100%;
+  background-repeat: no-repeat;
+  box-shadow: inset -1px 0 0 rgba(0, 0, 0, 0.22);
+  will-change: transform;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #app.motion-on .swatch,
+  #app.motion-on #clear-btn,
+  #app.motion-on .template-btn,
+  #app.motion-on .edge-wheel,
+  #app.motion-on:not(.colors-open) #palette .swatch,
+  #app.motion-on:not(.colors-open) #palette #clear-btn,
+  #app.motion-on:not(.templates-open) #templates .template-btn,
+  #app.motion-on.colors-open #color-wheel,
+  #app.motion-on.templates-open #template-wheel,
+  .shred-strip {
+    transition: none !important;
+    animation: none !important;
+  }
 }

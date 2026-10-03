@@ -143,7 +143,12 @@
   const templateBtnsEl = document.getElementById('template-btns');
   const colorWheel = document.getElementById('color-wheel');
   const templateWheel = document.getElementById('template-wheel');
+  const colorWheelHit = document.getElementById('color-wheel-hit');
+  const templateWheelHit = document.getElementById('template-wheel-hit');
   const peekPicsEl = document.getElementById('peek-pics');
+  let shredding = false;
+  let shredAudio = null;
+  let clearFromPointer = false;
 
   const PEEK_IDS = ['blume', 'sonne', 'haus', 'traktor'];
   /* After a wheel opens, ignore the click that lands on a button underneath. */
@@ -275,6 +280,9 @@
       btn.style.setProperty('--c', c.hex);
       btn.setAttribute('aria-label', c.name);
       btn.dataset.color = c.hex;
+      const face = document.createElement('span');
+      face.className = 'swatch-face';
+      btn.appendChild(face);
       // pointerdown: Farbe auch wechseln, während ein anderer Finger noch malt
       // (iOS liefert oft keinen click, solange eine Touch-Geste aktiv ist)
       const pick = (e) => {
@@ -299,8 +307,8 @@
 
   function openRail(which) {
     appEl.classList.add(which === 'colors' ? 'colors-open' : 'templates-open');
-    const wheel = which === 'colors' ? colorWheel : templateWheel;
-    if (wheel) wheel.setAttribute('aria-expanded', 'true');
+    const hit = which === 'colors' ? colorWheelHit : templateWheelHit;
+    if (hit) hit.setAttribute('aria-expanded', 'true');
     suppressRailClick = true;
     window.setTimeout(() => {
       suppressRailClick = false;
@@ -309,8 +317,8 @@
 
   function closeRails() {
     appEl.classList.remove('colors-open', 'templates-open');
-    if (colorWheel) colorWheel.setAttribute('aria-expanded', 'false');
-    if (templateWheel) templateWheel.setAttribute('aria-expanded', 'false');
+    if (colorWheelHit) colorWheelHit.setAttribute('aria-expanded', 'false');
+    if (templateWheelHit) templateWheelHit.setAttribute('aria-expanded', 'false');
   }
 
   function bindWheel(el, which) {
@@ -335,7 +343,7 @@
         (t.id === currentTemplateId ? ' active' : '');
       btn.setAttribute('aria-label', 'Vorlage: ' + t.name);
       btn.dataset.template = t.id;
-      btn.innerHTML = templateSvgMarkup(t, false);
+      btn.innerHTML = '<span class="tpl-face">' + templateSvgMarkup(t, false) + '</span>';
       const pick = (e) => {
         if (suppressRailClick && e.type === 'click') return;
         e.preventDefault();
@@ -492,7 +500,12 @@
   function isUiEvent(e) {
     const t = e.target;
     if (!t || !t.closest) return false;
-    return !!t.closest('#color-wheel, #template-wheel, .swatch, .template-btn, #clear-btn');
+    // Open rails swallow misses (padding included) so a gap cannot collapse them.
+    if (appEl.classList.contains('colors-open') && t.closest('#palette')) return true;
+    if (appEl.classList.contains('templates-open') && t.closest('#templates')) return true;
+    return !!t.closest(
+      '#color-wheel, #template-wheel, #color-wheel-hit, #template-wheel-hit, .swatch, .template-btn, #clear-btn'
+    );
   }
 
   /** Canvas bitmap point. `inside` is the white sheet (CSS box), not the black bezel. */
@@ -520,6 +533,7 @@
   }
 
   function startStroke(e) {
+    if (shredding) return;
     if (isUiEvent(e)) return;
     if (activePointers.has(e.pointerId)) return;
     if (e.pointerType === 'mouse' && e.button !== 0) return;
@@ -574,6 +588,250 @@
     // Persist when this finger lifts (others may still be drawing)
     saveCurrentToBuffer();
     persistToStorage();
+  }
+
+  function prefersReducedMotion() {
+    return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  }
+
+  /** Short paper-rip / small shredder. Synthesized, not a sample. Kept quiet. */
+  function playShredSound() {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return;
+    try {
+      if (!shredAudio) shredAudio = new AC();
+    } catch (_) {
+      return;
+    }
+    const actx = shredAudio;
+    const start = () => {
+      const dur = 0.42;
+      const sr = actx.sampleRate;
+      const n = (sr * dur) | 0;
+      const buffer = actx.createBuffer(1, n, sr);
+      const data = buffer.getChannelData(0);
+      let hp = 0;
+      let lp = 0;
+      for (let i = 0; i < n; i++) {
+        const t = i / sr;
+        const white = Math.random() * 2 - 1;
+        hp = hp * 0.72 + white * 0.28;
+        lp = lp * 0.9 + white * 0.1;
+        const attack = Math.min(1, t / 0.025);
+        const release = t > 0.3 ? Math.max(0, (dur - t) / 0.12) : 1;
+        const rip = 0.45 + 0.55 * Math.abs(Math.sin(2 * Math.PI * (22 + 16 * t) * t));
+        const crackle = hp * rip;
+        const motor = Math.sin(2 * Math.PI * 62 * t) * 0.12 * (0.65 + 0.35 * Math.sin(2 * Math.PI * 17 * t));
+        data[i] = (crackle * 0.62 + lp * 0.18 + motor) * attack * release * 0.42;
+      }
+      const src = actx.createBufferSource();
+      src.buffer = buffer;
+      const filter = actx.createBiquadFilter();
+      filter.type = 'highpass';
+      filter.frequency.value = 240;
+      filter.Q.value = 0.6;
+      const gain = actx.createGain();
+      gain.gain.value = 0.32;
+      src.connect(filter);
+      filter.connect(gain);
+      gain.connect(actx.destination);
+      src.start();
+    };
+    if (actx.state === 'suspended') {
+      actx.resume().then(start).catch(() => {});
+    } else {
+      start();
+    }
+  }
+
+  function overlayToImage() {
+    const svg = templateOverlay.querySelector('svg');
+    if (!svg) return Promise.resolve(null);
+    let xml = '';
+    try {
+      const clone = svg.cloneNode(true);
+      clone.setAttribute('width', '100');
+      clone.setAttribute('height', '100');
+      xml = new XMLSerializer().serializeToString(clone);
+    } catch (_) {
+      return Promise.resolve(null);
+    }
+    const blob = new Blob([xml], { type: 'image/svg+xml;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    return new Promise((resolve) => {
+      const img = new Image();
+      const done = (value) => {
+        URL.revokeObjectURL(url);
+        resolve(value);
+      };
+      img.onload = () => done(img);
+      img.onerror = () => done(null);
+      img.src = url;
+    });
+  }
+
+  function withTimeout(promise, ms) {
+    return new Promise((resolve) => {
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          resolve(null);
+        }
+      }, ms);
+      promise.then(
+        (value) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(value);
+        },
+        () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(null);
+        }
+      );
+    });
+  }
+
+  function sheetSnapshot() {
+    const shot = document.createElement('canvas');
+    shot.width = Math.max(1, canvas.width);
+    shot.height = Math.max(1, canvas.height);
+    const sctx = shot.getContext('2d');
+    sctx.fillStyle = '#ffffff';
+    sctx.fillRect(0, 0, shot.width, shot.height);
+    sctx.drawImage(canvas, 0, 0);
+    return withTimeout(overlayToImage(), 200).then((img) => {
+      if (img) {
+        try {
+          sctx.drawImage(img, 0, 0, shot.width, shot.height);
+        } catch (_) {}
+      }
+      return new Promise((resolve) => {
+        let done = false;
+        const finish = (blob) => {
+          if (done) return;
+          done = true;
+          resolve(blob || null);
+        };
+        try {
+          shot.toBlob((blob) => finish(blob), 'image/jpeg', 0.62);
+        } catch (_) {
+          finish(null);
+        }
+        window.setTimeout(() => finish(null), 500);
+      });
+    });
+  }
+
+  function runShredAnimation(blob) {
+    return new Promise((resolve) => {
+      if (!blob || prefersReducedMotion()) {
+        resolve();
+        return;
+      }
+      const rect = stageEl.getBoundingClientRect();
+      if (!(rect.width > 2) || !(rect.height > 2)) {
+        resolve();
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const n = 14;
+      const layer = document.createElement('div');
+      layer.className = 'shred-layer';
+      layer.setAttribute('aria-hidden', 'true');
+      const sw = rect.width / n;
+      for (let i = 0; i < n; i++) {
+        const strip = document.createElement('div');
+        strip.className = 'shred-strip';
+        strip.style.left = i * sw + 'px';
+        strip.style.width = sw + 0.6 + 'px';
+        strip.style.backgroundImage = 'url("' + url + '")';
+        strip.style.backgroundSize = rect.width + 'px ' + rect.height + 'px';
+        strip.style.backgroundPosition = -i * sw + 'px 0px';
+        layer.appendChild(strip);
+      }
+      const prevOverflow = stageEl.style.overflow;
+      const prevZ = stageEl.style.zIndex;
+      stageEl.style.overflow = 'visible';
+      stageEl.style.zIndex = '8';
+      canvas.style.visibility = 'hidden';
+      templateOverlay.style.visibility = 'hidden';
+      stageEl.appendChild(layer);
+
+      if (!layer.firstChild || typeof layer.firstChild.animate !== 'function') {
+        URL.revokeObjectURL(url);
+        layer.remove();
+        canvas.style.visibility = '';
+        templateOverlay.style.visibility = '';
+        stageEl.style.overflow = prevOverflow;
+        stageEl.style.zIndex = prevZ;
+        resolve();
+        return;
+      }
+
+      const pending = [];
+      const strips = layer.children;
+      for (let i = 0; i < strips.length; i++) {
+        const dir = i % 2 === 0 ? -1 : 1;
+        const drift = dir * (12 + (i % 4) * 8);
+        const rot = dir * (8 + (i % 3) * 5);
+        const delay = (i % 5) * 18;
+        const anim = strips[i].animate(
+          [
+            { transform: 'translate3d(0,0,0) rotate(0deg)', opacity: 1 },
+            {
+              transform: 'translate3d(' + dir * 6 + 'px, 10%, 0) rotate(' + dir * 3 + 'deg)',
+              opacity: 1,
+              offset: 0.2,
+            },
+            {
+              transform: 'translate3d(' + drift + 'px, 120%, 0) rotate(' + rot + 'deg)',
+              opacity: 0.8,
+            },
+          ],
+          {
+            duration: 640,
+            delay: delay,
+            easing: 'cubic-bezier(0.16, 0.84, 0.3, 1)',
+            fill: 'forwards',
+          }
+        );
+        pending.push(anim.finished.catch(() => {}));
+      }
+      let finished = false;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        URL.revokeObjectURL(url);
+        if (layer.parentNode) layer.remove();
+        canvas.style.visibility = '';
+        templateOverlay.style.visibility = '';
+        stageEl.style.overflow = prevOverflow;
+        stageEl.style.zIndex = prevZ;
+        resolve();
+      };
+      Promise.all(pending).then(finish, finish);
+      window.setTimeout(finish, 1100);
+    });
+  }
+
+  function shredAndClear() {
+    if (shredding) return;
+    shredding = true;
+    playShredSound();
+    const snap = sheetSnapshot();
+    // Empty the saved sheet immediately; the strips are only a picture of it.
+    clearCanvas();
+    snap
+      .then((blob) => runShredAnimation(blob))
+      .catch(() => {})
+      .then(() => {
+        shredding = false;
+      });
   }
 
   function clearCanvas() {
@@ -721,7 +979,16 @@
     if (suppressRailClick && e.type === 'click') return;
     e.preventDefault();
     e.stopPropagation();
-    clearCanvas();
+    if (e.type === 'pointerdown') {
+      clearFromPointer = true;
+      shredAndClear();
+      return;
+    }
+    if (clearFromPointer) {
+      clearFromPointer = false;
+      return;
+    }
+    shredAndClear();
   };
   clearBtn.addEventListener('pointerdown', clearPick);
   clearBtn.addEventListener('click', clearPick);
@@ -754,7 +1021,7 @@
 
   if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-      navigator.serviceWorker.register('./sw.js?v=25').catch(() => {});
+      navigator.serviceWorker.register('./sw.js?v=26').catch(() => {});
     });
   }
 
@@ -778,6 +1045,11 @@
 
   bindWheel(colorWheel, 'colors');
   bindWheel(templateWheel, 'templates');
+  bindWheel(colorWheelHit, 'colors');
+  bindWheel(templateWheelHit, 'templates');
+  requestAnimationFrame(() => {
+    appEl.classList.add('motion-on');
+  });
 
   // Init
   buildPalette();
